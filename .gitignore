@@ -1,0 +1,6 @@
+.project
+.classpath
+.DS_Store
+*.iml
+.idea
+.hugo_build.lock
