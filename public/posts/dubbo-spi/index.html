@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="author" content="不厌" />
+	
+	
+	
+	<title>Dubbo SPI 机制 - 基于 2.7.7 版本 ｜ BUYAN</title>
+	
+    
+    
+    <meta name="description" content="Dubbo SPI 机制涉及到 @SPI、@Adaptive、@Activate 三个注解，ExtensionLoader 作为 Dubbo SPI 机制的核心负责加载和管理扩展点及其实现。本文以 ExtensionLoader 的源码作为分析主线，进而引出三个注解的作用" />
+    
+
+    
+    
+    <meta name="keywords" content="java, code, program, programmer" />
+    
+
+	
+    
+    <link rel="shortcut icon" href="http://localhost:1313/images/favicon.ico" />
+
+    <link rel="stylesheet" type="text/css" media="screen" href="http://localhost:1313/css/normalize.css" />
+    <link rel="stylesheet" type="text/css" media="screen" href="https://cdn.jsdelivr.net/npm/animate.css@4.1.0/animate.min.css" />
+    <link rel="stylesheet" type="text/css" media="screen" href="http://localhost:1313/css/zozo.css" />
+	<link rel="stylesheet" type="text/css" media="screen" href="https://cdn.jsdelivr.net/npm/remixicon@2.5.0/fonts/remixicon.css" />
+    <link rel="stylesheet" type="text/css" media="screen" href="http://localhost:1313/css/highlight.css" />
+
+    
+    
+</head>
+
+<body>
+    <div class="main animate__animated animate__fadeInDown">
+        <div class="nav_container animated fadeInDown">
+    <div class="site_nav" id="site_nav">
+        <ul>
+            
+            <li>
+                <a href="/">Home</a>
+            </li>
+            
+            <li>
+                <a href="/posts/">Archive</a>
+            </li>
+            
+            <li>
+                <a href="/tags/">Tags</a>
+            </li>
+            
+            <li>
+                <a href="/about/">About</a>
+            </li>
+            
+        </ul>
+    </div>
+    <div class="menu_icon">
+        <a id="menu_icon"><i class="ri-menu-line"></i></a>
+    </div>
+</div>
+        <div class="header animated fadeInDown">
+    <div class="site_title_container">
+        <div class="site_title">
+            <h1>
+                <a href="http://localhost:1313/">
+                    <span>BUYAN</span>
+                </a>
+            </h1>
+        </div>
+        <div class="description">
+            <p class="sub_title">DON&#39;T WORRY BE HAPPY</p>
+            <div class="my_socials">
+                
+                
+                <a href="https://github.com/cheshtor" title="github" target="_blank"><i class="ri-github-fill"></i></a>
+                
+                
+                
+                <a href="https://twitter.com/cheshtor_" title="twitter" target="_blank"><i class="ri-twitter-fill"></i></a>
+                
+                
+                
+                <a href="https://weibo.com/u/6411133419" title="weibo" target="_blank"><i class="ri-weibo-fill"></i></a>
+                
+                
+                <a href="http://localhost:1313/index.xml" type="application/rss+xml" title="rss" target="_blank"><i
+                        class="ri-rss-fill"></i></a>
+            </div>
+        </div>
+    </div>
+</div>
+        <div class="content">
+            <div class="post_page">
+                <div class="post animate__animated animate__fadeInDown">
+                    <div class="post_title post_detail_title">
+                        <h2><a href='/posts/dubbo-spi/'>Dubbo SPI 机制 - 基于 2.7.7 版本</a></h2>
+                        <span class="date">2022.03.30</span>
+                    </div>
+                    <div class="post_content markdown"><p>Dubbo SPI 机制涉及到 <code>@SPI</code>、<code>@Adaptive</code>、<code>@Activate</code> 三个注解，ExtensionLoader 作为 Dubbo SPI 机制的核心负责加载和管理扩展点及其实现。本文以 ExtensionLoader 的源码作为分析主线，进而引出三个注解的作用和工作机制。</p>
+<p>ExtensionLoader 被设计为只能通过 <code>getExtensionLoader(Class&lt;T&gt; type)</code> 方法获取到实例，参数 <code>type</code> 表示拿到的这个实例要负责加载的扩展点类型。为了避免在之后的源码分析中产生困惑，请先记住这个结论：<strong>每个 ExtensionLoader 只能加载其绑定的扩展点类型（即 type 的类型）的具体实现</strong>。也就是说，如果 <code>type</code> 的值是 <code>Protocol.class</code>，那么这个 ExtensionLoader 的实例就只能加载 Protocol 接口的实现，不能去加载 Compiler 接口的实现。</p>
+<h1 id="怎么获取扩展实现">怎么获取扩展实现</h1>
+<p>在 Dubbo 里，如果一个接口标注了 <code>@SPI</code> 注解，那么它就表示一个扩展点类型，这个接口的实现就是这个扩展点的实现。比如 Protocol 接口的声明：</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="nd">@SPI</span><span class="o">(</span><span class="s">&#34;dubbo&#34;</span><span class="o">)</span>
+</span></span><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">interface</span> <span class="nc">Protocol</span> <span class="o">{}</span>
+</span></span></code></pre></div><p>一个扩展点可能存在多个实现，可以使用 <code>@SPI</code> 注解的 <code>value</code> 属性指定要选择的默认实现。当用户没有明确指定要使用哪个实现时，Dubbo 就会自动选择这个默认实现。</p>
+<p><code>getExtension(String name)</code> 方法可以获取指定名称的扩展实现的实例，这个扩展实现的类型必须是当前 ExtensionLoader 绑定的扩展类型。这个方法会先查缓存里是否有这个扩展实现的实例，如果没有再通过 <code>createExtension(String name)</code> 方法创建实例。Dubbo 在这一块设置了多层缓存，进入 <code>createExtension(String name)</code> 方法后又会调用 <code>getExtensionClasses()</code> 方法拿到当前 ExtensionLoader 已加载的所有扩展实现。如果还拿不到，那就调用 <code>loadExtensionClasses()</code> 方法真的去加载了。</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="kd">private</span> <span class="n">Map</span><span class="o">&lt;</span><span class="n">String</span><span class="o">,</span> <span class="n">Class</span><span class="o">&lt;?&gt;&gt;</span> <span class="n">loadExtensionClasses</span><span class="o">()</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">  <span class="c1">// 取 @SPI 注解上的值（只允许存在一个值）保存到 cachedDefaultName
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="n">cacheDefaultExtensionName</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">  <span class="n">Map</span><span class="o">&lt;</span><span class="n">String</span><span class="o">,</span> <span class="n">Class</span><span class="o">&lt;?&gt;&gt;</span> <span class="n">extensionClasses</span> <span class="o">=</span> <span class="k">new</span> <span class="n">HashMap</span><span class="o">&lt;&gt;();</span>
+</span></span><span class="line"><span class="cl">  <span class="c1">// 不同的策略代表不同的目录，迭代进行加载
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="k">for</span> <span class="o">(</span><span class="n">LoadingStrategy</span> <span class="n">strategy</span> <span class="o">:</span> <span class="n">strategies</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// loadDirectory(...)
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">// 执行不同策略
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="o">}</span>
+</span></span><span class="line"><span class="cl">  <span class="k">return</span> <span class="n">extensionClasses</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><p><code>cacheDefaultExtensionName()</code> 方法会从当前 ExtensionLoader 绑定的 <code>type</code> 上去获取 <code>@SPI</code> 注解，并将其 <code>value</code> 值保存到 ExtensionLoader 的 <code>cachedDefaultName</code> 字段用来表示扩展点的默认扩展实现的名称。</p>
+<h2 id="spi-配置的加载策略">SPI 配置的加载策略</h2>
+<p>接着迭代三种扩展实现加载策略。<code>strategies</code> 是通过 <code>loadLoadingStrategies()</code> 方法加载的，在这个方法里已经对三种策略进行了优先级排序，排序规则是<strong>低优先级的策略放在前面</strong>。简单看一下 LoadingStrategy 接口：</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">interface</span> <span class="nc">LoadingStrategy</span> <span class="kd">extends</span> <span class="n">Prioritized</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">String</span> <span class="nf">directory</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">    <span class="k">default</span> <span class="kt">boolean</span> <span class="nf">preferExtensionClassLoader</span><span class="o">()</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="kc">false</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">default</span> <span class="n">String</span><span class="o">[]</span> <span class="nf">excludedPackages</span><span class="o">()</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">default</span> <span class="kt">boolean</span> <span class="nf">overridden</span><span class="o">()</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="kc">false</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><p><code>overridden()</code> 方法表示当前策略加载的扩展实现是否可以覆盖比其优先级低的策略加载的扩展实现，优先级由 Prioritized 接口控制。为了在加载扩展实现时能够方便的进行覆盖操作，对加载策略进行预先排序就非常重要。这也是 <code>loadLoadingStrategies()</code> 方法要排序的原因。</p>
+<h2 id="查找和解析-spi-配置文件">查找和解析 SPI 配置文件</h2>
+<p><code>loadDirectory()</code> 方法在当前策略指定的目录下查找 SPI 配置文件并加载为 <code>java.net.URL</code> 对象，接下来 <code>loadResource()</code> 方法对配置文件进行逐行解析。Dubbo SPI 的配置文件是 <code>key=value</code> 形式，<code>key</code> 表示扩展实现的名称，<code>value</code> 是扩展实现的具体类名，这里直接 <code>split</code> 后对扩展实现进行加载，最后交给 <code>loadClass()</code> 方法处理。</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="kd">private</span> <span class="kt">void</span> <span class="nf">loadClass</span><span class="o">(</span><span class="n">Map</span><span class="o">&lt;</span><span class="n">String</span><span class="o">,</span> <span class="n">Class</span><span class="o">&lt;?&gt;&gt;</span> <span class="n">extensionClasses</span><span class="o">,</span> <span class="n">java</span><span class="o">.</span><span class="na">net</span><span class="o">.</span><span class="na">URL</span> <span class="n">resourceURL</span><span class="o">,</span> <span class="n">Class</span><span class="o">&lt;?&gt;</span> <span class="n">clazz</span><span class="o">,</span> <span class="n">String</span> <span class="n">name</span><span class="o">,</span> <span class="kt">boolean</span> <span class="n">overridden</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">NoSuchMethodException</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">  <span class="k">if</span> <span class="o">(!</span><span class="n">type</span><span class="o">.</span><span class="na">isAssignableFrom</span><span class="o">(</span><span class="n">clazz</span><span class="o">))</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">    <span class="k">throw</span> <span class="k">new</span> <span class="n">IllegalStateException</span><span class="o">(</span><span class="s">&#34;...&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">  <span class="o">}</span>
+</span></span><span class="line"><span class="cl">  <span class="c1">// 适配类
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="k">if</span> <span class="o">(</span><span class="n">clazz</span><span class="o">.</span><span class="na">isAnnotationPresent</span><span class="o">(</span><span class="n">Adaptive</span><span class="o">.</span><span class="na">class</span><span class="o">))</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">cacheAdaptiveClass</span><span class="o">(</span><span class="n">clazz</span><span class="o">,</span> <span class="n">overridden</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">  <span class="o">}</span> <span class="k">else</span> <span class="k">if</span> <span class="o">(</span><span class="n">isWrapperClass</span><span class="o">(</span><span class="n">clazz</span><span class="o">))</span> <span class="o">{</span> <span class="c1">// 包装类
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="n">cacheWrapperClass</span><span class="o">(</span><span class="n">clazz</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">  <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">clazz</span><span class="o">.</span><span class="na">getConstructor</span><span class="o">();</span> <span class="c1">// 检查点：扩展类必须要有一个无参构造器
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">// 兜底策略：如果配置文件没有按 key=value 这样写，就取类的简单名称作为 key，即 name
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">if</span> <span class="o">(</span><span class="n">StringUtils</span><span class="o">.</span><span class="na">isEmpty</span><span class="o">(</span><span class="n">name</span><span class="o">))</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">      <span class="n">name</span> <span class="o">=</span> <span class="n">findAnnotationName</span><span class="o">(</span><span class="n">clazz</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">      <span class="k">if</span> <span class="o">(</span><span class="n">name</span><span class="o">.</span><span class="na">length</span><span class="o">()</span> <span class="o">==</span> <span class="n">0</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">throw</span> <span class="k">new</span> <span class="n">IllegalStateException</span><span class="o">(</span><span class="s">&#34;...&#34;</span> <span class="o">+</span> <span class="n">resourceURL</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">      <span class="o">}</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="n">String</span><span class="o">[]</span> <span class="n">names</span> <span class="o">=</span> <span class="n">NAME_SEPARATOR</span><span class="o">.</span><span class="na">split</span><span class="o">(</span><span class="n">name</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="o">(</span><span class="n">ArrayUtils</span><span class="o">.</span><span class="na">isNotEmpty</span><span class="o">(</span><span class="n">names</span><span class="o">))</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">      <span class="c1">// 如果当前实现类标注了 @Activate 则缓存
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>      <span class="n">cacheActivateClass</span><span class="o">(</span><span class="n">clazz</span><span class="o">,</span> <span class="n">names</span><span class="o">[</span><span class="n">0</span><span class="o">]);</span>
+</span></span><span class="line"><span class="cl">      <span class="c1">// 扩展实现可以用逗号分隔取很多名字（a,b,c=com.xxx.Yyy），这里迭代所有名字做缓存
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>      <span class="k">for</span> <span class="o">(</span><span class="n">String</span> <span class="n">n</span> <span class="o">:</span> <span class="n">names</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">// 缓存 扩展实现的实例 -&gt; 名称
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="n">cacheName</span><span class="o">(</span><span class="n">clazz</span><span class="o">,</span> <span class="n">n</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">// 缓存 名称 -&gt; 扩展实现的实例
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="n">saveInExtensionClass</span><span class="o">(</span><span class="n">extensionClasses</span><span class="o">,</span> <span class="n">clazz</span><span class="o">,</span> <span class="n">n</span><span class="o">,</span> <span class="n">overridden</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">      <span class="o">}</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">  <span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><p><code>cacheAdaptiveClass()</code> 方法是对 <code>@Adaptive</code> 的处理，这个稍后会介绍。</p>
+<h2 id="包装类">包装类</h2>
+<p>来看 <code>isWrapperClass()</code> 方法，这个方法用来判断当前实例化的扩展实现是否为包装类。判断条件非常简单，<strong>只要某个类具有一个只有一个参数的构造器，且这个参数的类型和当前 ExtensionLoader 绑定的扩展类型一致，这个类就是包装类</strong>。</p>
+<p>在 Dubbo 中包装类都是以 Wrapper 结尾，比如 QosProtocolWrapper：</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">class</span> <span class="nc">QosProtocolWrapper</span> <span class="kd">implements</span> <span class="n">Protocol</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">  <span class="kd">private</span> <span class="n">Protocol</span> <span class="n">protocol</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">	<span class="c1">// 包装类必要的构造器
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="kd">public</span> <span class="nf">QosProtocolWrapper</span><span class="o">(</span><span class="n">Protocol</span> <span class="n">protocol</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="o">(</span><span class="n">protocol</span> <span class="o">==</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">      <span class="k">throw</span> <span class="k">new</span> <span class="n">IllegalArgumentException</span><span class="o">(</span><span class="s">&#34;protocol == null&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">this</span><span class="o">.</span><span class="na">protocol</span> <span class="o">=</span> <span class="n">protocol</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">  <span class="o">}</span>
+</span></span><span class="line"><span class="cl">  
+</span></span><span class="line"><span class="cl">  <span class="nd">@Override</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span> <span class="n">Exporter</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span> <span class="nf">export</span><span class="o">(</span><span class="n">Invoker</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span> <span class="n">invoker</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">RpcException</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="o">(</span><span class="n">UrlUtils</span><span class="o">.</span><span class="na">isRegistry</span><span class="o">(</span><span class="n">invoker</span><span class="o">.</span><span class="na">getUrl</span><span class="o">()))</span> <span class="o">{</span> <span class="c1">// 一些额外的逻辑
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>            <span class="n">startQosServer</span><span class="o">(</span><span class="n">invoker</span><span class="o">.</span><span class="na">getUrl</span><span class="o">());</span>
+</span></span><span class="line"><span class="cl">            <span class="k">return</span> <span class="n">protocol</span><span class="o">.</span><span class="na">export</span><span class="o">(</span><span class="n">invoker</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="o">}</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="n">protocol</span><span class="o">.</span><span class="na">export</span><span class="o">(</span><span class="n">invoker</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="nd">@Override</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span> <span class="n">Invoker</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span> <span class="nf">refer</span><span class="o">(</span><span class="n">Class</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span> <span class="n">type</span><span class="o">,</span> <span class="n">URL</span> <span class="n">url</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">RpcException</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="o">(</span><span class="n">UrlUtils</span><span class="o">.</span><span class="na">isRegistry</span><span class="o">(</span><span class="n">url</span><span class="o">))</span> <span class="o">{</span> <span class="c1">// 一些额外的逻辑
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>            <span class="n">startQosServer</span><span class="o">(</span><span class="n">url</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">            <span class="k">return</span> <span class="n">protocol</span><span class="o">.</span><span class="na">refer</span><span class="o">(</span><span class="n">type</span><span class="o">,</span> <span class="n">url</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="o">}</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="n">protocol</span><span class="o">.</span><span class="na">refer</span><span class="o">(</span><span class="n">type</span><span class="o">,</span> <span class="n">url</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><p>可以看到，Dubbo 中的包装类实际上就是 AOP 的一种实现，并且多个包装类可以不断嵌套，类似 Java I/O 类库的设计。回到 <code>loadClass()</code> 方法，如果当前是包装类，则放入 <code>cachedWrapperClasses</code> 集合中保存。</p>
+<h2 id="兜底不标准的-spi-配置文件">兜底不标准的 SPI 配置文件</h2>
+<p>在 <code>loadClass()</code> 方法的最后一个 <code>else</code> 分支中，首先去获取了一次当前扩展实现的无参构造器，因为之后实例化扩展实现的时候需要这个构造器，这里等于是提前做了一个检查。然后是做兜底操作，因为 SPI 配置文件可能没有按照 Dubbo 的要求写成 <code>key=value</code> 形式，那么就把扩展实现类的类名作为 <code>key</code>。<code>cacheActivateClass()</code>  方法用于判断当前扩展实现是否携带了 <code>@Activate</code> 注解，如果有则缓存，这个注解的用处后文会详述。</p>
+<h2 id="扩展实现及其名称的多种缓存">扩展实现及其名称的多种缓存</h2>
+<p>最后把扩展实现的名称和扩展实现的 Class 对象进行双向缓存。<code>cacheName()</code> 方法做 Class 对象到扩展实现名称的映射，<code>saveInExtensionClass()</code> 是做扩展实现名称到 Class 对象的映射。</p>
+<p><code>saveInExtensionClass()</code> 方法的参数 <code>overridden</code> 实际就是来自于加载策略 LoadingStrategy 的 <code>overridden()</code> 方法。上文提到过三个加载策略是在迭代时是按照优先级从小到大顺序进行的，所以只要当前的 LoadingStrategy 允许覆盖之前策略创建的扩展实现，那么这里 <code>overridden</code> 就为 <code>true</code>。</p>
+<p>到了这里实际上就是 <code>loadExtensionClasses()</code> 方法的全部执行逻辑，当方法执行完成后当前 ExtensionLoader 所绑定的扩展类型的所有实现类就全部被加载成了 Class 对象并放入了 <code>cachedClasses</code> 中。</p>
+<h2 id="实例化扩展实现">实例化扩展实现</h2>
+<p>再往上返回到 <code>createExtension(String name)</code> 中，如果在已加载的扩展实现类里找不到当前要获取扩展实现则抛出异常。接着尝试从缓存中获取一下对应的实例，如果没有则实例化并放入缓存。<code>injectExtension()</code> 方法就是通过反射将当前实例化出来的扩展实现所依赖的其他扩展实现也初始化并赋值。</p>
+<p>这里用到一个 <code>ExtensionFactory objectFactory</code>，AdaptiveExtensionFactory 作为 ExtensionFactory 的适配实现，对 SpiExtensionFactory 和 SpringExtensionFactory 进行了适配。当要获取一个扩展实现时，都是调用 AdaptiveExtensionFactory 的 <code>getExtension(Class&lt;T&gt; type, String name)</code> 方法。</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="kd">public</span> <span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span> <span class="n">T</span> <span class="nf">getExtension</span><span class="o">(</span><span class="n">Class</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span> <span class="n">type</span><span class="o">,</span> <span class="n">String</span> <span class="n">name</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">  <span class="k">for</span> <span class="o">(</span><span class="n">ExtensionFactory</span> <span class="n">factory</span> <span class="o">:</span> <span class="n">factories</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">T</span> <span class="n">extension</span> <span class="o">=</span> <span class="n">factory</span><span class="o">.</span><span class="na">getExtension</span><span class="o">(</span><span class="n">type</span><span class="o">,</span> <span class="n">name</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="o">(</span><span class="n">extension</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">      <span class="k">return</span> <span class="n">extension</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">  <span class="o">}</span>
+</span></span><span class="line"><span class="cl">  <span class="k">return</span> <span class="kc">null</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><p>这个方法分别尝试调用两个具体实现的 <code>getExtension()</code> 方法来获取扩展实现。SpiExtensionFactory 是从 Dubbo 自己的容器里查找扩展实现，实际就是调用 ExtensionLoader 的方法来实现，算是一个门面。SpringExtensionFactory 顾名思义就是从 Spring 容器内查找扩展实现，毕竟很多时候 Dubbo 都是配合着 Spring 在使用。</p>
+<p>回到 <code>createExtension(String name)</code> 方法继续往下看，接下来是迭代在加载扩展实现时保存的包装类，滚动将上一个包装完的实例作为下一个包装类的构造器参数进行包装，也就是说最终拿到的扩展实现的实例是最后一个包装类的实例。最后的最后，如果扩展实现有 Lifecycle 接口，则调用其 <code>initialize()</code> 方法初始化生命周期。至此，一个扩展实现就被创建出来了！</p>
+<h1 id="怎么选择要使用的扩展实现">怎么选择要使用的扩展实现</h1>
+<p>在 <code>loadClass()</code> 方法中提到过，如果加载的扩展实现带有 <code>@Adaptive</code> 注解，<code>cacheAdaptiveClass()</code> 方法将会把这个扩展实现按照加载策略的覆盖（overridden）设置赋值给 <code>cachedAdaptiveClass</code>。</p>
+<h2 id="adaptive-的作用">@Adaptive 的作用</h2>
+<p>Dubbo 中的扩展点一般都具有很多个扩展实现，简单说就是一个接口存在很多个实现。但接口是不能被实例化的，所以要在运行时找一个具体的实现类来实例化。 <code>@Adaptive</code> 是用来在运行时决定选择哪个实现的。如果标注在类上就表示这个类是适配类，加载扩展实现的时候直接赋值给 ExtensionLoader 的 <code>cachedAdaptiveClass</code> 字段即可，例如上文讲到的 AdaptiveExtensionFactory。</p>
+<p>所以这里简单总结一下，所谓<strong>适配类就是在实际使用扩展点的时候用来选择具体的扩展实现的那个类</strong>。</p>
+<p><code>@Adaptive</code> 也可以标注在接口方法上，表示这个方法要在运行时通过字节码生成工具动态生成方法体，在方法体内选择具体的实现来使用，比如 Protocol 接口：</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="nd">@SPI</span><span class="o">(</span><span class="s">&#34;dubbo&#34;</span><span class="o">)</span>
+</span></span><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">interface</span> <span class="nc">Protocol</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">  <span class="nd">@Adaptive</span>
+</span></span><span class="line"><span class="cl">  <span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span> <span class="n">Exporter</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span> <span class="nf">export</span><span class="o">(</span><span class="n">Invoker</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span> <span class="n">invoker</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">RpcException</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">  <span class="nd">@Adaptive</span>
+</span></span><span class="line"><span class="cl">  <span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span> <span class="n">Invoker</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span> <span class="nf">refer</span><span class="o">(</span><span class="n">Class</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span> <span class="n">type</span><span class="o">,</span> <span class="n">URL</span> <span class="n">url</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">RpcException</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><p>很明显，Protocol 的每个实现都有自己暴露服务和引用服务的逻辑，如果直接根据 URL 去解析要使用的协议并实例化显然不是一个好的选择。作为一个 Spring 应用工程师，应该立刻想到 IoC 才是人间正道。Dubbo 的开发者（可能）也是这么想的，但是自己搞一套 IoC 出来又好像不是太合适，于是就通过了字节码增强的方式来实现。</p>
+<h2 id="动态适配类的创建">动态适配类的创建</h2>
+<p>如果一个扩展点的所有实现类上都没有携带 <code>@Adaptive</code> 注解，但是扩展点的某些方法上带了 <code>@Adaptive</code> 注解，这就表示 Dubbo 需要在运行时使用字节码增强工具动态的创建一个扩展点的代理类，在代理类的同名方法里选择具体的扩展实现进行调用。</p>
+<p>这么说有点抽象，我们来看 ExtensionLoader 的 <code>getAdaptiveExtension()</code> 方法。这个方法获取当前 ExtensionLoader 绑定的扩展点的适配类，首先从 <code>cachedAdaptiveInstance</code> 上尝试获取，这个字段保存的是上文提到的 <code>cachedAdaptiveClass</code> 实例化的结果。如果获取不到，经过双重检查锁后调用 <code>createAdaptiveExtension()</code> 方法进行适配类的创建。</p>
+<p><code>createAdaptiveExtension()</code> 方法又调用 <code>getAdaptiveExtensionClass()</code> 方法拿到适配类的 Class 对象，即上文提到的 <code>cachedAdaptiveClass</code>，然后将 Class 实例化后调用 <code>injectExtension()</code> 方法进行注入。</p>
+<p><code>getAdaptiveExtensionClass()</code> 方法发现 <code>cachedAdaptiveClass</code> 没有值后转而调用 <code>createAdaptiveExtensionClass()</code> 方法动态生成一个适配类。这里涉及到的几个方法很简单就不贴代码了，下面看一下动态生成适配的方法。</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="kd">private</span> <span class="n">Class</span><span class="o">&lt;?&gt;</span> <span class="n">createAdaptiveExtensionClass</span><span class="o">()</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">  <span class="n">String</span> <span class="n">code</span> <span class="o">=</span> <span class="k">new</span> <span class="n">AdaptiveClassCodeGenerator</span><span class="o">(</span><span class="n">type</span><span class="o">,</span> <span class="n">cachedDefaultName</span><span class="o">).</span><span class="na">generate</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">  <span class="n">ClassLoader</span> <span class="n">classLoader</span> <span class="o">=</span> <span class="n">findClassLoader</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">  <span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">compiler</span><span class="o">.</span><span class="na">Compiler</span> <span class="n">compiler</span> <span class="o">=</span> 
+</span></span><span class="line"><span class="cl">    <span class="n">ExtensionLoader</span><span class="o">.</span><span class="na">getExtensionLoader</span><span class="o">(</span><span class="n">org</span><span class="o">.</span><span class="na">apache</span><span class="o">.</span><span class="na">dubbo</span><span class="o">.</span><span class="na">common</span><span class="o">.</span><span class="na">compiler</span><span class="o">.</span><span class="na">Compiler</span><span class="o">.</span><span class="na">class</span><span class="o">)</span>
+</span></span><span class="line"><span class="cl">    <span class="o">.</span><span class="na">getAdaptiveExtension</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">  <span class="k">return</span> <span class="n">compiler</span><span class="o">.</span><span class="na">compile</span><span class="o">(</span><span class="n">code</span><span class="o">,</span> <span class="n">classLoader</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><p>首先调用 AdaptiveClassCodeGenerator 类的 <code>generate()</code> 方法把适配类生成好，然后也是走 SPI 机制拿到需要的 Compiler 的适配类执行编译，最后把编译出来的适配类的 Class 对象返回。</p>
+<p>Dubbo 使用 javassist 框架来动态生成适配类，AdaptiveClassCodeGenerator 类的 <code>generate()</code> 方法实际就是做的适配类文件的字符串拼接。具体的生成逻辑没有什么好讲的，都是些字符串操作，这里简单写个示例：</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="nd">@SPI</span>
+</span></span><span class="line"><span class="cl"><span class="kd">interface</span> <span class="nc">TroubleMaker</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nd">@Adaptive</span>
+</span></span><span class="line"><span class="cl">    <span class="n">Server</span> <span class="nf">bind</span><span class="o">(</span><span class="n">arg0</span><span class="o">,</span> <span class="n">arg1</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">  
+</span></span><span class="line"><span class="cl">    <span class="n">Result</span> <span class="nf">doSomething</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">class</span> <span class="nc">TroubleMaker$Adaptive</span> <span class="kd">implements</span> <span class="n">TroubleMaker</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">  
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="n">Result</span> <span class="nf">doSomething</span><span class="o">()</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">      <span class="k">throw</span> <span class="k">new</span> <span class="n">UnsupportedOperationException</span><span class="o">(</span><span class="s">&#34;The method doSomething of interface TroubleMaker is not adaptive method!&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="kd">public</span> <span class="n">Server</span> <span class="nf">bind</span><span class="o">(</span><span class="n">arg0</span><span class="o">,</span> <span class="n">arg1</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">TroubleMaker</span> <span class="n">extension</span> <span class="o">=</span>
+</span></span><span class="line"><span class="cl">            <span class="o">(</span><span class="n">TroubleMaker</span><span class="o">)</span> <span class="n">ExtensionLoader</span>
+</span></span><span class="line"><span class="cl">                <span class="o">.</span><span class="na">getExtensionLoader</span><span class="o">(</span><span class="n">TroubleMaker</span><span class="o">.</span><span class="na">class</span><span class="o">)</span>
+</span></span><span class="line"><span class="cl">                <span class="o">.</span><span class="na">getExtension</span><span class="o">(</span><span class="n">extName</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="n">extension</span><span class="o">.</span><span class="na">bind</span><span class="o">(</span><span class="n">arg0</span><span class="o">,</span> <span class="n">arg1</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">    <span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><p>假设有个扩展点叫 TroubleMaker，那么动态生成的适配类就叫做 TroubleMaker$Adaptive，适配类对没有标注 <code>@Adaptive</code> 注解的方法会直接抛出异常，而使用了 <code>@Adaptive</code> 注解的方法内部实际是通过 ExtensionLoader 去找到要使用的具体的扩展实现，再调用这个扩展实现的同名方法。</p>
+<p>扩展实现的选择遵循以下逻辑：</p>
+<ul>
+<li>读取 <code>@Adaptive</code> 注解的 <code>value</code> 属性，如果 <code>value</code> 没有值则把当前扩展点接口名转换为「点分隔」形式，比如 TroubleMaker 转换为 trouble.maker。然后用这个作为 key 从 URL 上去获取要使用的具体扩展实现。</li>
+<li>如果上一步没有获取到，则取扩展点接口上的 <code>@SPI</code> 注解的 <code>value</code> 值作为 key 再去 URL 上获取。</li>
+</ul>
+<h1 id="怎么启用扩展实现">怎么启用扩展实现</h1>
+<p>有些扩展点的扩展实现是可以同时使用多个的，并且可以按照实际需求来启用，比如 Filter 扩展点的众多扩展实现。这就带来两个问题，一个是怎么启用扩展，另一个是扩展是否可以启用。Dubbo 提供了 <code>@Activate</code> 注解来标注扩展的启用条件。</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="kd">public</span> <span class="nd">@interface</span> <span class="n">Activate</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">  <span class="n">String</span><span class="o">[]</span> <span class="nf">group</span><span class="o">()</span> <span class="k">default</span> <span class="o">{};</span>
+</span></span><span class="line"><span class="cl">  <span class="n">String</span><span class="o">[]</span> <span class="nf">value</span><span class="o">()</span> <span class="k">default</span> <span class="o">{};</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><p>众所周知 Dubbo 分为客户端和服务端两侧，<code>group</code> 用来指定扩展可以在哪一端启用，取值只能是 <code>consumer</code> 或 <code>provider</code>，对应的常量位于 CommonConstants。<code>value</code> 用来指定扩展实现的开启条件，也就是说如果 URL 上能通过 <code>getParameter(value)</code> 方法获取一个不为空（即不为 <code>false</code>、<code>0</code>、<code>null</code> 和 <code>N/A</code>）的值，那么这个扩展实现就会被启用。</p>
+<p>例如存在一个 Filter 扩展点的扩展实现 FilterX：</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="nd">@Activate</span><span class="o">(</span><span class="n">group</span> <span class="o">=</span> <span class="o">{</span><span class="n">CommonConstants</span><span class="o">.</span><span class="na">PROVIDER</span><span class="o">},</span> <span class="n">value</span> <span class="o">=</span> <span class="s">&#34;x&#34;</span><span class="o">)</span>
+</span></span><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">class</span> <span class="nc">FilterX</span> <span class="kd">implements</span> <span class="n">Filter</span> <span class="o">{}</span>
+</span></span></code></pre></div><p>如果当前是服务端一侧在加载扩展实现，并且 <code>url.getParameter(&quot;x&quot;)</code> 能拿到一个不为空的值，那 FilterX 这个扩展实现就会被启用。需要注意的是，<strong>@Activate 的 value 属性的值不需要和 SPI 配置文件里的 key 保持一致，并且 value 可以是个数组</strong>。</p>
+<h2 id="启用扩展实现的方式">启用扩展实现的方式</h2>
+<p>第一种启用方式就是上文所讲的让 <code>value</code> 作为 url 的 key 并且值不为空，另一种扩展实现的启用就要回到 ExtensionLoader 的 <code>getActivateExtension(URL url, String key, String group)</code> 方法。</p>
+<p>参数 <code>key</code> 表示一个存在于 <code>url</code> 上的参数，这个参数的值指定了要启用的扩展实现，多个扩展实现之间用逗号分隔，参数 <code>group</code> 表示当前是服务端一侧还是客户端一侧。这个方法把通过参数 <code>key</code> 获取到的值拆分后调用了重载方法 <code>getActivateExtension(URL url, String[] values, String group)</code>，这个方法就是扩展实现启用的关键点所在。</p>
+<p>首先是判断要开启的扩展实现名称列表里有没有 <code>-default</code>，这里的 <code>-</code> 是减号，是「去掉」的意思，<code>default</code> 表示<strong>默认开启的扩展实现</strong>，所以 <code>-default</code> 的意思就是要去掉默认开启的扩展实现。所谓<strong>默认开启的扩展实现，其实就是携带了 <code>@Activate</code> 注解但是注解的 <code>value</code> 没有值的那些扩展实现</strong>，比如 ConsumerContextFilter。以此推论，<strong>如果扩展实现的名称前带了 <code>-</code> 就表示这个扩展实现不开启</strong>。</p>
+<p>如果没有 <code>-default</code> 接着就是迭代 <code>cachedActivates</code> 去判断哪些扩展实现是需要使用的，关键方法是 <code>isActive(String[] keys, URL url)</code>。这个方法在源码里没有注释，理解起来可能有些困难。实际上就是判断传入的这些 <code>keys</code> 是否在 <code>url</code> 上存在。</p>
+<p>这里有个骚操作，<code>cachedActivates</code> 保存的是「扩展实现名称」到「<code>@Aactivate</code>」注解的映射，也就是这个 <code>map</code> 的 <code>value</code> 不是扩展实现的 Class 对象或者实例。因为 <code>cachedClasses</code> 和 <code>cachedInstances</code> 已经分别保存了两者，只要有扩展实现的名字就可以获取到，没有必要多保存一份。</p>
+<p>回到方法的另外一个分支，如果有 <code>-default</code>，那就是只开启 <code>url</code> 上指定的扩展实现，同时处理一下携带了 <code>-</code> 的名称。方法最后把所有要开启的扩展实现放入 <code>activateExtensions</code> 集合返回。</p>
+<h2 id="启用扩展实现的示例">启用扩展实现的示例</h2>
+<p>个人认为 Dubbo SPI 这一块适合采用视频的方式进行源码分析，因为这里面有很多逻辑是相互牵连的，依靠文字不太容易讲的明白。所以这里用一个示例来展示上文讲到的扩展实现启用逻辑。假设现在存在以下 5 个自定义 Filter：</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">class</span> <span class="nc">FilterA</span> <span class="kd">implements</span> <span class="n">Filter</span> <span class="o">{}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nd">@Activate</span><span class="o">(</span><span class="n">group</span> <span class="o">=</span> <span class="o">{</span><span class="n">CommonConstants</span><span class="o">.</span><span class="na">PROVIDER</span><span class="o">},</span> <span class="n">order</span> <span class="o">=</span> <span class="n">2</span><span class="o">)</span>
+</span></span><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">class</span> <span class="nc">FilterB</span> <span class="kd">implements</span> <span class="n">Filter</span> <span class="o">{}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nd">@Activate</span><span class="o">(</span><span class="n">group</span> <span class="o">=</span> <span class="o">{</span><span class="n">CommonConstants</span><span class="o">.</span><span class="na">CONSUMER</span><span class="o">},</span> <span class="n">order</span> <span class="o">=</span> <span class="n">3</span><span class="o">)</span>
+</span></span><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">class</span> <span class="nc">FilterC</span> <span class="kd">implements</span> <span class="n">Filter</span> <span class="o">{}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nd">@Activate</span><span class="o">(</span><span class="n">group</span> <span class="o">=</span> <span class="o">{</span><span class="n">CommonConstants</span><span class="o">.</span><span class="na">PROVIDER</span><span class="o">,</span> <span class="n">CommonConstants</span><span class="o">.</span><span class="na">CONSUMER</span><span class="o">},</span> <span class="n">order</span> <span class="o">=</span> <span class="n">4</span><span class="o">)</span>
+</span></span><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">class</span> <span class="nc">FilterD</span> <span class="kd">implements</span> <span class="n">Filter</span> <span class="o">{}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nd">@Activate</span><span class="o">(</span><span class="n">group</span> <span class="o">=</span> <span class="o">{</span><span class="n">CommonConstants</span><span class="o">.</span><span class="na">PROVIDER</span><span class="o">,</span> <span class="n">CommonConstants</span><span class="o">.</span><span class="na">CONSUMER</span><span class="o">},</span> <span class="n">order</span> <span class="o">=</span> <span class="n">5</span><span class="o">,</span> <span class="n">value</span> <span class="o">=</span> <span class="s">&#34;e&#34;</span><span class="o">)</span>
+</span></span><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">class</span> <span class="nc">FilterE</span> <span class="kd">implements</span> <span class="n">Filter</span> <span class="o">{}</span>
+</span></span></code></pre></div><p>配置文件 <code>META-INF/dubbo/internal/org.apache.dubbo.rpc.Filter</code></p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-fallback" data-lang="fallback"><span class="line"><span class="cl">fa=org.apache.dubbo.rpc.demo.FilterA
+</span></span><span class="line"><span class="cl">fb=org.apache.dubbo.rpc.demo.FilterB
+</span></span><span class="line"><span class="cl">fc=org.apache.dubbo.rpc.demo.FilterC
+</span></span><span class="line"><span class="cl">fd=org.apache.dubbo.rpc.demo.FilterD
+</span></span><span class="line"><span class="cl">fe=org.apache.dubbo.rpc.demo.FilterE
+</span></span></code></pre></div><p>首先直接查找消费者端（Consumer）可以使用的 Filter 扩展点的扩展实现：</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="kd">public</span> <span class="kd">static</span> <span class="kt">void</span> <span class="nf">main</span><span class="o">(</span><span class="n">String</span><span class="o">[]</span> <span class="n">args</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">  <span class="n">ExtensionLoader</span><span class="o">&lt;</span><span class="n">Filter</span><span class="o">&gt;</span> <span class="n">extensionLoader</span> <span class="o">=</span> <span class="n">ExtensionLoader</span><span class="o">.</span><span class="na">getExtensionLoader</span><span class="o">(</span><span class="n">Filter</span><span class="o">.</span><span class="na">class</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">URL</span> <span class="n">url</span> <span class="o">=</span> <span class="k">new</span> <span class="n">URL</span><span class="o">(</span><span class="s">&#34;&#34;</span><span class="o">,</span> <span class="s">&#34;&#34;</span><span class="o">,</span> <span class="n">10086</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">List</span><span class="o">&lt;</span><span class="n">Filter</span><span class="o">&gt;</span> <span class="n">activate</span> <span class="o">=</span> <span class="n">extensionLoader</span><span class="o">.</span><span class="na">getActivateExtension</span><span class="o">(</span><span class="n">url</span><span class="o">,</span> <span class="s">&#34;&#34;</span><span class="o">,</span> <span class="n">CommonConstants</span><span class="o">.</span><span class="na">CONSUMER</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">activate</span><span class="o">.</span><span class="na">forEach</span><span class="o">(</span><span class="n">a</span> <span class="o">-&gt;</span> <span class="n">System</span><span class="o">.</span><span class="na">out</span><span class="o">.</span><span class="na">println</span><span class="o">(</span><span class="n">a</span><span class="o">.</span><span class="na">getClass</span><span class="o">().</span><span class="na">getName</span><span class="o">()));</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span><span class="line"><span class="cl"><span class="c1">// 输出
+</span></span></span><span class="line"><span class="cl"><span class="c1">// org.apache.dubbo.rpc.filter.ConsumerContextFilter
+</span></span></span><span class="line"><span class="cl"><span class="c1">// org.apache.dubbo.rpc.demo.FilterC
+</span></span></span><span class="line"><span class="cl"><span class="c1">// org.apache.dubbo.rpc.demo.FilterD
+</span></span></span></code></pre></div><p>可以看到自定义扩展实现里的 C 和 D 被启用。A 由于没有 <code>@Activate</code> 注解不会默认启用，B 限制了只能在服务端（Provider）启用，E 的 <code>@Activate</code> 注解的 <code>value</code> 属性限制了 URL 上必须存在名叫 <code>e</code> 的参数可以被启用。</p>
+<p>接下来添加参数尝试让 E 被启用：</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="n">URL</span> <span class="n">url</span> <span class="o">=</span> <span class="k">new</span> <span class="n">URL</span><span class="o">(</span><span class="s">&#34;&#34;</span><span class="o">,</span> <span class="s">&#34;&#34;</span><span class="o">,</span> <span class="n">10086</span><span class="o">).</span><span class="na">addParameter</span><span class="o">(</span><span class="s">&#34;e&#34;</span><span class="o">,</span> <span class="o">(</span><span class="n">String</span><span class="o">)</span> <span class="kc">null</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl"><span class="c1">// 输出
+</span></span></span><span class="line"><span class="cl"><span class="c1">// org.apache.dubbo.rpc.filter.ConsumerContextFilter
+</span></span></span><span class="line"><span class="cl"><span class="c1">// org.apache.dubbo.rpc.demo.FilterC
+</span></span></span><span class="line"><span class="cl"><span class="c1">// org.apache.dubbo.rpc.demo.FilterD
+</span></span></span></code></pre></div><p>可以看到 E 还是没被启用，这是因为虽然 URL 上存在了名为 <code>e</code> 的参数，但是值为空，不符合启用规则，这时候只要把值调整为任何不为空（即不为 <code>false</code>、<code>0</code>、<code>null</code> 和 <code>N/A</code>）的值就可以启用 E 了。</p>
+<p>换另一种方式启用 E：</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="n">URL</span> <span class="n">url</span> <span class="o">=</span> <span class="k">new</span> <span class="n">URL</span><span class="o">(</span><span class="s">&#34;&#34;</span><span class="o">,</span> <span class="s">&#34;&#34;</span><span class="o">,</span> <span class="n">3</span><span class="o">).</span><span class="na">addParameter</span><span class="o">(</span><span class="s">&#34;filterValue&#34;</span><span class="o">,</span> <span class="s">&#34;fe&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl"><span class="n">List</span><span class="o">&lt;</span><span class="n">Filter</span><span class="o">&gt;</span> <span class="n">activate</span> <span class="o">=</span> <span class="n">extensionLoader</span><span class="o">.</span><span class="na">getActivateExtension</span><span class="o">(</span><span class="n">url</span><span class="o">,</span> <span class="s">&#34;filterValue&#34;</span><span class="o">,</span> <span class="n">CommonConstants</span><span class="o">.</span><span class="na">CONSUMER</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl"><span class="c1">// 输出
+</span></span></span><span class="line"><span class="cl"><span class="c1">// org.apache.dubbo.rpc.filter.ConsumerContextFilter
+</span></span></span><span class="line"><span class="cl"><span class="c1">// org.apache.dubbo.rpc.demo.FilterC
+</span></span></span><span class="line"><span class="cl"><span class="c1">// org.apache.dubbo.rpc.demo.FilterD
+</span></span></span><span class="line"><span class="cl"><span class="c1">// org.apache.dubbo.rpc.demo.FilterE
+</span></span></span></code></pre></div><p>添加参数 <code>filterValue</code> 并指定值为 <code>fe</code>，这里的值要和 SPI 配置文件里的 key 保持一致。调用 <code>getActivateExtension()</code> 方法时指定这个参数的名字，这时就可以看到 E 被启用了。</p>
+<p>接下来试试去掉默认开启的扩展实现并指定 A 启用：</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="n">URL</span> <span class="n">url</span> <span class="o">=</span> <span class="k">new</span> <span class="n">URL</span><span class="o">(</span><span class="s">&#34;&#34;</span><span class="o">,</span> <span class="s">&#34;&#34;</span><span class="o">,</span> <span class="n">3</span><span class="o">).</span><span class="na">addParameter</span><span class="o">(</span><span class="s">&#34;filterValue&#34;</span><span class="o">,</span> <span class="s">&#34;fa,-default&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl"><span class="n">List</span><span class="o">&lt;</span><span class="n">Filter</span><span class="o">&gt;</span> <span class="n">activate</span> <span class="o">=</span> <span class="n">extensionLoader</span><span class="o">.</span><span class="na">getActivateExtension</span><span class="o">(</span><span class="n">url</span><span class="o">,</span> <span class="s">&#34;filterValue&#34;</span><span class="o">,</span> <span class="n">CommonConstants</span><span class="o">.</span><span class="na">CONSUMER</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl"><span class="c1">// 输出
+</span></span></span><span class="line"><span class="cl"><span class="c1">// org.apache.dubbo.rpc.demo.FilterA
+</span></span></span></code></pre></div><p>加上 <code>-default</code> 后 ConsumerContextFilter 和 C 、D 被禁用了，因为他们是默认开启的实现。再回忆一次，默认开启的扩展实现其实就是携带了 <code>@Activate</code> 注解但是注解的 <code>value</code> 没有值的那些扩展实现。尽管 A 没有携带 <code>@Activate</code> 注解，但是这里指定了需要启用，所以 A 被启用。</p>
+<h1 id="最后">最后</h1>
+<p>好了，终于分析完了 Dubbo 的这一套 SPI 机制，其实也不算太复杂，只是逻辑绕了一点，有机会我会将本文录制为视频讲解，希望能让大家有更好的理解。</p>
+</div>
+                    <div class="post_footer">
+                        
+                        <div class="meta">
+                            <div class="info">
+                                <span class="field tags">
+                                    <i class="ri-stack-line"></i>
+                                    
+                                    <a href="http://localhost:1313/tags/tech/">Tech</a>
+                                    
+                                </span>
+                            </div>
+                        </div>
+                        
+                    </div>
+                </div>
+                
+                
+                <div class="doc_comments"></div>
+                
+            </div>
+        </div>
+    </div>
+    <a id="back_to_top" href="#" class="back_to_top"><i class="ri-arrow-up-s-line"></i></a>
+    <footer class="footer">
+    <div class="powered_by">
+        <a href="http://www.gohugo.io/">Proudly published with Hugo</a>
+    </div>
+
+    <div class="footer_slogan">
+        <span>Somebody, Nobody.</span>
+    </div>
+</footer>
+    <script src="http://localhost:1313/js/jquery-3.5.1.min.js"></script>
+<link href="http://localhost:1313/css/fancybox.min.css" rel="stylesheet">
+<script src="http://localhost:1313/js/fancybox.min.js"></script>
+<script src="http://localhost:1313/js/zozo.js"></script>
+
+
+<script type="text/javascript" async
+    src="https://cdn.bootcss.com/mathjax/2.7.5/MathJax.js?config=TeX-AMS-MML_HTMLorMML">
+        MathJax.Hub.Config({
+            tex2jax: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\[\[', '\]\]']],
+                processEscapes: true,
+                processEnvironments: true,
+                skipTags: ['script', 'noscript', 'style', 'textarea', 'pre'],
+                TeX: {
+                    equationNumbers: { autoNumber: "AMS" },
+                    extensions: ["AMSmath.js", "AMSsymbols.js"]
+                }
+            }
+        });
+
+        MathJax.Hub.Queue(function () {
+            
+            
+            
+            var all = MathJax.Hub.getAllJax(), i;
+            for (i = 0; i < all.length; i += 1) {
+                all[i].SourceElement().parentNode.className += ' has-jax';
+            }
+        });
+    </script>
+
+<style>
+    code.has-jax {
+        font: inherit;
+        font-size: 100%;
+        background: inherit;
+        border: inherit;
+        color: #515151;
+    }
+</style>
+
+
+
+</body>
+
+</html>
