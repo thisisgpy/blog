@@ -59,6 +59,8 @@ for (EasyExcelMappingFieldDefinition definition : definitions) {
 }
 ```
 
+`defineProperty()` 方法会自动为属性生成 `getter/setter`，便于数据存取。ByteBuddy 还提供了 `defineField()` 方法来定义一个属性，但不会自动生成 `getter/setter`。
+
 这里只是定义了 Java Bean 的属性，但是 EasyExcel 的工作是需要读取属性上的 `@ExcelProperty` 注解来完成，所以还要为每一个属性创建这个注解。在 ByteBuddy 中，使用 `AnnotationDescription` 来描述一个注解。
 
 ```java
