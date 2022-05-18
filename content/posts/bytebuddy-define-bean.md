@@ -12,8 +12,8 @@ slug: "bytebuddy-easyexcel"
 
 ```java
 DynamicType.Builder<Object> builder = new ByteBuddy()
-																			.subclass(Object.class)
-																			.name("io.buyan.demo.beans.DemoBean");
+          .subclass(Object.class)
+          .name("io.buyan.demo.beans.DemoBean");
 ```
 
 这时候 `builder` 就可以简单理解为 ByteBuddy 创建的这个类的字节码，之后所有的操作都基于 `builder` 进行。由于 ByteBuddy 将 `builder` 设计为了不可变模式，所以如果不是链式调用相关 API，那么对 `builder` 的每一次操作都需要接收其返回的新的 `builder` 实例。
