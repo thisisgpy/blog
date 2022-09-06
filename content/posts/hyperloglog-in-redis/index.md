@@ -36,14 +36,14 @@ HyperLogLog 是一个求解集的势（即集合中不重复元素个数）的�
 1. XZERO 指令。这个指令会占用 2 字节的空间，表示连续多少个桶的计数为 0。和 ZERO 指令的区别在于，高位的 2bit 标志位默认是 01，低 14 位用于表示有多少个桶，最大可表示 16384 个桶。
 1. VAL 指令。这个指令会占用 1 字节的空间，表示连续多少个桶的计数为 N（N > 0）。高位的 1bit 是标志位，默认值是 1，接下来的 5bit 表示计数 N，低 2 位表示痛的数量，所以最大可表示计数为 32。
 
-![Redis HyperLogLog 稀疏存储结构](../../static/hyperloglog-sparse.jpeg)
+![Redis HyperLogLog 稀疏存储结构](./hyperloglog-sparse.jpeg)
 
 如上图所示，在稀疏存储结构模式下，一个 Redis HyperLogLog 实例在初始状态时只需要占用 2 个字节。由于 VAL 指令能够表示的计数最大为 32，所以只要出现 N > 32 的情况，稀疏存储结构就会变成密集存储结构。另外，如果稀疏存储结构的内存占用超过了 3000 字节，也会默认转为密集存储结构，这个阈值可以使用 `hll_sparse_max_bytes` 参数进行调整。
 
 无论是使用稀疏存储结构还是密集存储结构，最终的目的是要计算出这个集合的势。HyperLogLog 算法求解公式如下：
 
 $$
-DV_{LL} = c * m * \frac{m}{\sum_{i=1}^m\frac{1}{x_i}}
+DV_{HLL} = c * m * \frac{m}{\sum_{i=1}^m\frac{1}{x_i}}
 $$
 
 `m` 是桶的数量，`c` 是常数，由 `m` 来计算得出。首先计算 `m` 以 2 为底的对数：
@@ -87,6 +87,6 @@ Redis 的 HyperLogLog 使用 16384 个桶的依据就找到了。最后就是对
 
 在 Redis 中可以使用 `pfmerge` 命令来合并多个 HyperLogLog 实例，这个合并的过程实际就是在两个实例的相同编号的桶里选择保存的更大的那个数据作为新的 HyperLogLog 实例对应位置的数据。
 
-![HyperLogLog 实例合并](../../static/hyperloglog-merge.jpg)
+![HyperLogLog 实例合并](./hyperloglog-merge.jpg)
 
-最后，Redis 中所有操作 HyperLogLog  的命令都是以 `pf` 开头，这是因为 HyperLogLog  算法的作者是法国人 Philippe Flajolet，已于 2011 年 3 月 22 日去世，享年 64 岁。
+最后，Redis 中所有操作 HyperLogLog 的命令都是以 `pf` 开头，这是因为 HyperLogLog 算法的作者是法国人 Philippe Flajolet，已于 2011 年 3 月 22 日去世，享年 64 岁。
