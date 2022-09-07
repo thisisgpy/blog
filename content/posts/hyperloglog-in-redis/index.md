@@ -76,8 +76,14 @@ $$
 在 Redis 对 HyperLogLog 的实现中，预期 RSD 为 0.81%，代入上面的公式：
 
 $$
-0.0081 = \frac{1.04}{\sqrt[2]{m}} \\
-\sqrt[2]{m} \approx 128 \\
+0.0081 = \frac{1.04}{\sqrt[2]{m}}
+$$
+
+$$
+\sqrt[2]{m} \approx 128
+$$
+
+$$
 m = 16384
 $$
 

@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en" >
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="author" content="不厌" />
+	
+	
+	
+	<title>HyperLogLog 算法及其在 Redis 中的实现 ｜ BUYAN</title>
+	
+    
+    
+    <meta name="description" content="HyperLogLog 是一个求解集的势（即集合中不重复元素个数）的算法，由于是基于统计学的算法，所以结果必然会存在一定的误差。 在抛硬币游戏中（伯努利试验），如果对方说自己最多能够连续抛出反面 2 次，那么我们由此可以推断对方" />
+    
+
+    
+    
+    <meta name="keywords" content="java, code, program, programmer" />
+    
+
+	
+    
+    <link rel="shortcut icon" href="https://blog-lyart-eight.vercel.app/images/favicon.ico" />
+
+    <link rel="stylesheet" type="text/css" media="screen" href="https://blog-lyart-eight.vercel.app/css/normalize.css" />
+    <link rel="stylesheet" type="text/css" media="screen" href="https://cdn.jsdelivr.net/npm/animate.css@4.1.0/animate.min.css" />
+    <link rel="stylesheet" type="text/css" media="screen" href="https://blog-lyart-eight.vercel.app/css/zozo.css" />
+	<link rel="stylesheet" type="text/css" media="screen" href="https://cdn.jsdelivr.net/npm/remixicon@2.5.0/fonts/remixicon.css" />
+    <link rel="stylesheet" type="text/css" media="screen" href="https://blog-lyart-eight.vercel.app/css/highlight.css" />
+
+    
+    
+</head>
+
+<body>
+    <div class="main animate__animated animate__fadeInDown">
+        <div class="nav_container animated fadeInDown">
+    <div class="site_nav" id="site_nav">
+        <ul>
+            
+            <li>
+                <a href="/">Home</a>
+            </li>
+            
+            <li>
+                <a href="/posts/">Archive</a>
+            </li>
+            
+            <li>
+                <a href="/tags/">Tags</a>
+            </li>
+            
+            <li>
+                <a href="/about/">About</a>
+            </li>
+            
+        </ul>
+    </div>
+    <div class="menu_icon">
+        <a id="menu_icon"><i class="ri-menu-line"></i></a>
+    </div>
+</div>
+        <div class="header animated fadeInDown">
+    <div class="site_title_container">
+        <div class="site_title">
+            <h1>
+                <a href="https://blog-lyart-eight.vercel.app/">
+                    <span>BUYAN</span>
+                </a>
+            </h1>
+        </div>
+        <div class="description">
+            <p class="sub_title">DON&#39;T WORRY BE HAPPY</p>
+            <div class="my_socials">
+                
+                
+                <a href="https://github.com/cheshtor" title="github" target="_blank"><i class="ri-github-fill"></i></a>
+                
+                
+                
+                <a href="https://twitter.com/cheshtor_" title="twitter" target="_blank"><i class="ri-twitter-fill"></i></a>
+                
+                
+                
+                <a href="https://weibo.com/u/6411133419" title="weibo" target="_blank"><i class="ri-weibo-fill"></i></a>
+                
+                
+                <a href="https://blog-lyart-eight.vercel.app/index.xml" type="application/rss+xml" title="rss" target="_blank"><i
+                        class="ri-rss-fill"></i></a>
+            </div>
+        </div>
+    </div>
+</div>
+        <div class="content">
+            <div class="post_page">
+                <div class="post animate__animated animate__fadeInDown">
+                    <div class="post_title post_detail_title">
+                        <h2><a href='/posts/hyperloglog-in-redis/'>HyperLogLog 算法及其在 Redis 中的实现</a></h2>
+                        <span class="date">2022.09.05</span>
+                    </div>
+                    <div class="post_content markdown"><p>HyperLogLog 是一个求解集的势（即集合中不重复元素个数）的算法，由于是基于统计学的算法，所以结果必然会存在一定的误差。</p>
+<p>在抛硬币游戏中（伯努利试验），如果对方说自己最多能够连续抛出反面 2 次，那么我们由此可以推断对方抛硬币的总次数一定不多。如果对方说自己最多能够连续抛出反面 10 次，这时候我们就可以推断对方一定抛了非常多次硬币（除非出现突发事件），这实际就是一个普通的概率问题。但是怎么计算出对方抛硬币的大概次数呢？</p>
+<p>我们将每次抛硬币结果记录下来，正面朝上记为 1，反面朝上记为 0，最终得到一个由 0 和 1 组成的序列。比如存在这么一个序列：</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-fallback" data-lang="fallback"><span class="line"><span class="cl">01 01 0001 00
+</span></span></code></pre></div><p>接下来从这个序列中找出 0 出现的连续次数最多的那一段子序列（包括这个序列后面的那个 1），即 0001，简单计算就能得出要出现这个子序列的概率是 1/2 的 4 次幂，即 1/16，这时候我们就可以估计出对方大概抛了 16 次硬币。很显然，这种估算方式存在较大的误差，而且很容易收到突发事件（比如连续抛出了多次反面）的影响，这时候就需要 HyperLogLog 算法来减小这个误差。</p>
+<p>如开篇所述，HyperLogLog 的目标是求集的势，而集合中存放的元素又可以是任何类型，那么在实际应用中怎么将这些元素转换为上文示例中的 01 序列呢？答案很简单，先求集合中的每一个元素的 hash 值，然后再将 hash 值转换为二进制，这样就可以将每个集合元素都转换为算法所需要的 01 序列了。接下来的算法过程，我们以 Redis 的实现作为例子进行讲解。</p>
+<p>当有新元素放入 Redis 提供的 HyperLogLog 数据结构时：</p>
+<ol>
+<li>对元素进行 hash 运算得到一个 64bit 的比特串</li>
+<li>将比特串的低 14 位，即右边 14 位拿出来作为桶的编号，则最多会存在 2^14 = 16384 个桶</li>
+<li>在剩下的 50 位中找到第一次出现的 1（从低位开始往高位找，即从右往左找），将其下标（下标计数从 1 开始）放入第 2 步算出的编号对应的桶中。如果桶中有数据，则只有在当前下标值大于桶中的值时才放入。</li>
+</ol>
+<p>64bit 拿掉低 14 位后还有 50 位，桶里存放的是 50 位中第一次出现的 1 的下标，这就意味着下标最大只能是 50。要存下 50 这个数字只需要 6bit，所以在 Redis 中一个桶只需要占用 6bit 的空间，16384 个桶总共只需要 12kb 的空间，这就是通常所说的一个 Redis HyperLogLog 实例最多只占用 12kb 的依据。这种数据存储模式叫做 <strong>密集存储结构</strong>。</p>
+<p>考虑这样一个情况，在一个 Redis HyperLogLog 实例的生命周期里，只有少量的数据会被添加进来，也就是说 16384 个桶中的绝大部分都不会保存数据（桶中的计数默认为 0），这时候也需要直接分配 12kb 的内存来维护这些桶吗？Redis 为了进一步节省内存，采用 <strong>稀疏存储结构</strong> 来进一步优化。</p>
+<p>在创建 Redis HyperLogLog 实例时，Redis 不会直接分配 12kb 的空间来维护所有的桶，而是自定义了三条指令来减小空间使用。</p>
+<ol>
+<li>ZERO 指令。这个指令会占用 1 字节的空间，表示连续多少个桶的计数为 0。高位的 2bit 是标志位，默认是 00，低 6 位用于表示有多少个桶，最大表示 64 个桶。</li>
+<li>XZERO 指令。这个指令会占用 2 字节的空间，表示连续多少个桶的计数为 0。和 ZERO 指令的区别在于，高位的 2bit 标志位默认是 01，低 14 位用于表示有多少个桶，最大可表示 16384 个桶。</li>
+<li>VAL 指令。这个指令会占用 1 字节的空间，表示连续多少个桶的计数为 N（N &gt; 0）。高位的 1bit 是标志位，默认值是 1，接下来的 5bit 表示计数 N，低 2 位表示痛的数量，所以最大可表示计数为 32。</li>
+</ol>
+<p><img src="./hyperloglog-sparse.jpeg" alt="Redis HyperLogLog 稀疏存储结构"></p>
+<p>如上图所示，在稀疏存储结构模式下，一个 Redis HyperLogLog 实例在初始状态时只需要占用 2 个字节。由于 VAL 指令能够表示的计数最大为 32，所以只要出现 N &gt; 32 的情况，稀疏存储结构就会变成密集存储结构。另外，如果稀疏存储结构的内存占用超过了 3000 字节，也会默认转为密集存储结构，这个阈值可以使用 <code>hll_sparse_max_bytes</code> 参数进行调整。</p>
+<p>无论是使用稀疏存储结构还是密集存储结构，最终的目的是要计算出这个集合的势。HyperLogLog 算法求解公式如下：</p>
+<p>$$
+DV_{HLL} = c * m * \frac{m}{\sum_{i=1}^m\frac{1}{x_i}}
+$$</p>
+<p><code>m</code> 是桶的数量，<code>c</code> 是常数，由 <code>m</code> 来计算得出。首先计算 <code>m</code> 以 2 为底的对数：</p>
+<p>$$
+p = log_2m
+$$</p>
+<p>然后根据 <code>p</code> 的值来选择 <code>c</code> 的值（这些值是 HyperLogLog 算法里写明的，此处不再进一步推导）：</p>
+<div class="highlight"><pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="k">switch</span> <span class="o">(</span><span class="n">p</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">   <span class="k">case</span> <span class="n">4</span><span class="o">:</span>
+</span></span><span class="line"><span class="cl">       <span class="n">c</span> <span class="o">=</span> <span class="n">0</span><span class="o">.</span><span class="na">673</span> <span class="o">*</span> <span class="n">m</span> <span class="o">*</span> <span class="n">m</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">   <span class="k">case</span> <span class="n">5</span><span class="o">:</span>
+</span></span><span class="line"><span class="cl">       <span class="n">c</span> <span class="o">=</span> <span class="n">0</span><span class="o">.</span><span class="na">697</span> <span class="o">*</span> <span class="n">m</span> <span class="o">*</span> <span class="n">m</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">   <span class="k">case</span> <span class="n">6</span><span class="o">:</span>
+</span></span><span class="line"><span class="cl">       <span class="n">c</span> <span class="o">=</span> <span class="n">0</span><span class="o">.</span><span class="na">709</span> <span class="o">*</span> <span class="n">m</span> <span class="o">*</span> <span class="n">m</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl">   <span class="k">default</span><span class="o">:</span>
+</span></span><span class="line"><span class="cl">       <span class="n">c</span> <span class="o">=</span> <span class="o">(</span><span class="n">0</span><span class="o">.</span><span class="na">7213</span> <span class="o">/</span> <span class="o">(</span><span class="n">1</span> <span class="o">+</span> <span class="n">1</span><span class="o">.</span><span class="na">079</span> <span class="o">/</span> <span class="n">m</span><span class="o">))</span> <span class="o">*</span> <span class="n">m</span> <span class="o">*</span> <span class="n">m</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span></code></pre></div><p>正如开篇所述，HyperLogLog 是一个基于统计学的算法，其求出的解是必然存在偏差的，所以桶的数量 <code>m</code> 决定了最终求出的解的准确度，桶越多，精度越高。这个准确度也称作「相对标准误差」，即 RSD，准确度与桶的数量可以形成如下的关系：</p>
+<p>$$
+RSD = \frac{1.04}{\sqrt[2]{m}}
+$$</p>
+<p>在 Redis 对 HyperLogLog 的实现中，预期 RSD 为 0.81%，代入上面的公式：</p>
+<p>$$
+0.0081 = \frac{1.04}{\sqrt[2]{m}}
+$$</p>
+<p>$$
+\sqrt[2]{m} \approx 128
+$$</p>
+<p>$$
+m = 16384
+$$</p>
+<p>Redis 的 HyperLogLog 使用 16384 个桶的依据就找到了。最后就是对所有的桶求调和平均数，将每个桶保存的数据的倒数相加，与桶数量 <code>m</code> 相除即可。</p>
+<p>调和平均数的结果会倾向于较小的数，这比直接使用算数平均数可以更少的受到大数的影响。比如计算你和你领导的薪资，你一个月 1000，你领导一个月 100000，算数平均数为 50500，很明显这个结果距离里的薪资差距非常大。但是调和平均数的结果为 1980 元，这就比较接近你的薪资了。</p>
+<p>在 Redis 中可以使用 <code>pfmerge</code> 命令来合并多个 HyperLogLog 实例，这个合并的过程实际就是在两个实例的相同编号的桶里选择保存的更大的那个数据作为新的 HyperLogLog 实例对应位置的数据。</p>
+<p><img src="./hyperloglog-merge.jpg" alt="HyperLogLog 实例合并"></p>
+<p>最后，Redis 中所有操作 HyperLogLog 的命令都是以 <code>pf</code> 开头，这是因为 HyperLogLog 算法的作者是法国人 Philippe Flajolet，已于 2011 年 3 月 22 日去世，享年 64 岁。</p>
+</div>
+                    <div class="post_footer">
+                        
+                        <div class="meta">
+                            <div class="info">
+                                <span class="field tags">
+                                    <i class="ri-stack-line"></i>
+                                    
+                                    <a href="https://blog-lyart-eight.vercel.app/tags/tech/">Tech</a>
+                                    
+                                </span>
+                            </div>
+                        </div>
+                        
+                    </div>
+                </div>
+                
+                
+                <div class="doc_comments"></div>
+                
+            </div>
+        </div>
+    </div>
+    <a id="back_to_top" href="#" class="back_to_top"><i class="ri-arrow-up-s-line"></i></a>
+    <footer class="footer">
+    <div class="powered_by">
+        <a href="http://www.gohugo.io/">Proudly published with Hugo</a>
+    </div>
+
+    <div class="footer_slogan">
+        <span>Somebody, Nobody.</span>
+    </div>
+</footer>
+    <script src="https://blog-lyart-eight.vercel.app/js/jquery-3.5.1.min.js"></script>
+<link href="https://blog-lyart-eight.vercel.app/css/fancybox.min.css" rel="stylesheet">
+<script src="https://blog-lyart-eight.vercel.app/js/fancybox.min.js"></script>
+<script src="https://blog-lyart-eight.vercel.app/js/zozo.js"></script>
+
+
+<script type="text/javascript" async
+    src="https://cdn.bootcss.com/mathjax/2.7.5/MathJax.js?config=TeX-AMS-MML_HTMLorMML">
+        MathJax.Hub.Config({
+            tex2jax: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\[\[', '\]\]']],
+                processEscapes: true,
+                processEnvironments: true,
+                skipTags: ['script', 'noscript', 'style', 'textarea', 'pre'],
+                TeX: {
+                    equationNumbers: { autoNumber: "AMS" },
+                    extensions: ["AMSmath.js", "AMSsymbols.js"]
+                }
+            }
+        });
+
+        MathJax.Hub.Queue(function () {
+            
+            
+            
+            var all = MathJax.Hub.getAllJax(), i;
+            for (i = 0; i < all.length; i += 1) {
+                all[i].SourceElement().parentNode.className += ' has-jax';
+            }
+        });
+    </script>
+
+<style>
+    code.has-jax {
+        font: inherit;
+        font-size: 100%;
+        background: inherit;
+        border: inherit;
+        color: #515151;
+    }
+</style>
+
+
+
+</body>
+
+</html>
