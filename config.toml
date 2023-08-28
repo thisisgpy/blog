@@ -1,7 +1,7 @@
-baseURL = "https://www.buyan.io/"
+baseURL = "https://blog.ganpengyu.com/"
 languageCode = "en"
 defaultContentLanguage = "en"
-title = "BUYAN"                        # site title                     # 网站标题
+title = "不厌"                        # site title                     # 网站标题
 theme = "zozo"
 hasCJKLanguage = true                  # has chinese/japanese/korean ?  # 自动检测是否包含 中文\日文\韩文
 summaryLength = 100
@@ -42,10 +42,10 @@ pygmentscodefencesguesssyntax = true
   url = "/about/"
 
 [params]
-  subTitle = "DON'T WORRY BE HAPPY"                                       # site's subTitle              # 网站二级标题
+  subTitle = "相看两不厌"                                       # site's subTitle              # 网站二级标题
   footerSlogan = "Somebody, Nobody."                                   # site's footer slogan         # 网站页脚标语
-  keywords = ["java","code","program","programmer"]                                   # site's keywords              # 网站关键字
-  description = "BUYAN, somebody, nobody."                        # site's description           # 网站描述
+  keywords = ["java","project","pmp","programmer"]                                   # site's keywords              # 网站关键字
+  description = "不厌, 相看两不厌."                        # site's description           # 网站描述
   enableMathJax = true                                                 # enable mathjax               # 是否使用mathjax（数学公式）
   enableSummary = true                                                 # display the article summary  # 是否显示文章摘要
   mainSections = ["posts","post"]
