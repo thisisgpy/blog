@@ -1,24 +1,20 @@
 baseURL = "https://blog.ganpengyu.com/"
-languageCode = "en"
+locale = "en"
 defaultContentLanguage = "en"
 title = "不厌"                        # site title                     # 网站标题
 theme = "zozo"
 hasCJKLanguage = true                  # has chinese/japanese/korean ?  # 自动检测是否包含 中文\日文\韩文
 summaryLength = 100
-paginate = 5                           # shows the number of articles   # 首页显示文章数量
 enableEmoji = true
-googleAnalytics = ""                   # your google analytics id       # Google统计代码
-disqusShortname = ""                   # your discuss shortname         # Disqus评论系统代码
 
-pygmentsUseClasses = true
-pygmentCodeFences = true
-pygmentscodefencesguesssyntax = true
+[pagination]
+  pagerSize = 5                         # shows the number of articles   # 首页显示文章数量
 
-[author]                               # essential                      # 必需
-  name = "不厌"
-
-[blackfriday]
-  smartypants = false
+[services]
+  [services.googleAnalytics]
+    id = ""                             # your google analytics id       # Google统计代码
+  [services.disqus]
+    shortname = ""                      # your discuss shortname         # Disqus评论系统代码
 
 [[menu.main]]                          # config your menu               # 配置菜单
   name = "Home"
@@ -49,6 +45,9 @@ pygmentscodefencesguesssyntax = true
   enableMathJax = true                                                 # enable mathjax               # 是否使用mathjax（数学公式）
   enableSummary = true                                                 # display the article summary  # 是否显示文章摘要
   mainSections = ["posts","post"]
+
+[params.author]                               # essential                      # 必需
+  name = "不厌"
   
 # Valine.
 # You can get your appid and appkey from https://leancloud.cn
@@ -62,12 +61,15 @@ pygmentscodefencesguesssyntax = true
 
 # Your socail's url
 # 社交地址配置
-[social]
+[params.social]
   github = "https://github.com/cheshtor"
   twitter = "https://twitter.com/cheshtor_"
   weibo = "https://weibo.com/u/6411133419"
 
 [markup]
-[markup.goldmark]
-[markup.goldmark.renderer]
-  unsafe = true
+  [markup.highlight]
+    guessSyntax = true
+    noClasses = false
+  [markup.goldmark]
+    [markup.goldmark.renderer]
+      unsafe = true

@@ -1,4 +1,4 @@
-<script src="{{ "js/jquery-3.5.1.min.js" | absURL }}"></script>
+<script src="{{ "js/jquery-3.7.1.min.js" | absURL }}"></script>
 <link href="{{ "css/fancybox.min.css" | absURL }}" rel="stylesheet">
 <script src="{{ "js/fancybox.min.js" | absURL }}"></script>
 <script src="{{ "js/zozo.js" | absURL }}"></script>
@@ -7,4 +7,6 @@
 {{ partial "mathjax.html" . }}
 {{ end }}
 
-{{ template "_internal/google_analytics_async.html" . }}
+{{ with .Site.Config.Services.GoogleAnalytics.ID }}
+{{ template "_internal/google_analytics.html" $ }}
+{{ end }}

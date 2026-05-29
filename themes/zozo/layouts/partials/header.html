@@ -10,13 +10,15 @@
         <div class="description">
             <p class="sub_title">{{ with .Site.Params.subTitle }}{{ . }}{{ else }}{{ end }}</p>
             <div class="my_socials">
-                {{ range $key, $val := .Site.Social }}
+                {{ range $key, $val := .Site.Params.social }}
                 {{ if ne $val "" }}
                 <a href="{{ $val }}" title="{{ $key }}" target="_blank"><i class="ri-{{ $key }}-fill"></i></a>
                 {{ end }}
                 {{ end }}
-                <a href="{{ .Site.RSSLink }}" type="application/rss+xml" title="rss" target="_blank"><i
+                {{ with site.Home.OutputFormats.Get "rss" }}
+                <a href="{{ .RelPermalink }}" type="{{ .MediaType.Type }}" title="rss" target="_blank"><i
                         class="ri-rss-fill"></i></a>
+                {{ end }}
             </div>
         </div>
     </div>
